@@ -90,6 +90,7 @@ from authentik.core.models import (
     default_token_duration,
 )
 from authentik.core.signals import impersonation_changed
+from authentik.core.user_types import matches_user_type
 from authentik.core.views.user_switch import start_user_switch_flow
 from authentik.endpoints.connectors.agent.auth import AgentAuth
 from authentik.events.models import Event, EventAction
@@ -326,7 +327,7 @@ class UserSerializer(AttributesMixinSerializer, ModelSerializer):
             and attrs.get("password_hash") is not None
         ):
             raise ValidationError(_("Cannot set both password and password_hash. Use only one."))
-        if self.instance and self.instance.type == UserTypes.INTERNAL_SERVICE_ACCOUNT:
+        if self.instance and matches_user_type(self.instance, internal_service_accounts=True):
             raise ValidationError(_("Can't modify internal service account users"))
         return super().validate(attrs)
 

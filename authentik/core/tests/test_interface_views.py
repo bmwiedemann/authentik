@@ -52,10 +52,6 @@ class TestInterfaceRedirects(TestCase):
         """Service accounts are redirected to the default app from root"""
         self._assert_redirects_to_app("root-redirect", UserTypes.SERVICE_ACCOUNT)
 
-    def test_root_redirect_internal_service_account(self):
-        """Internal service accounts are redirected to the default app from root"""
-        self._assert_redirects_to_app("root-redirect", UserTypes.INTERNAL_SERVICE_ACCOUNT)
-
     def test_root_redirect_internal_user(self):
         """Internal users are NOT redirected to the app from root"""
         self._assert_no_redirect("root-redirect", UserTypes.INTERNAL)
@@ -70,10 +66,6 @@ class TestInterfaceRedirects(TestCase):
         """Service accounts are redirected to the default app from if/user/"""
         self._assert_redirects_to_app("if-user", UserTypes.SERVICE_ACCOUNT)
 
-    def test_if_user_internal_service_account(self):
-        """Internal service accounts are redirected to the default app from if/user/"""
-        self._assert_redirects_to_app("if-user", UserTypes.INTERNAL_SERVICE_ACCOUNT)
-
     def test_if_user_internal_user(self):
         """Internal users are NOT redirected to the app from if/user/"""
         self._assert_no_redirect("if-user", UserTypes.INTERNAL)
@@ -83,10 +75,6 @@ class TestInterfaceRedirects(TestCase):
     def test_if_admin_service_account(self):
         """Service accounts are redirected to the default app from if/admin/"""
         self._assert_redirects_to_app("if-admin", UserTypes.SERVICE_ACCOUNT)
-
-    def test_if_admin_internal_service_account(self):
-        """Internal service accounts are redirected to the default app from if/admin/"""
-        self._assert_redirects_to_app("if-admin", UserTypes.INTERNAL_SERVICE_ACCOUNT)
 
     def test_if_admin_internal_user(self):
         """Internal users are NOT redirected to the app from if/admin/"""

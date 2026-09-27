@@ -16,6 +16,7 @@ from authentik.brands.api import CurrentBrandSerializer
 from authentik.brands.models import Brand
 from authentik.core.apps import Setup
 from authentik.core.models import UserTypes
+from authentik.core.user_types import matches_user_type
 from authentik.lib.config import CONFIG
 from authentik.policies.denied import AccessDeniedResponse
 
@@ -27,10 +28,11 @@ class RootRedirectView(AccessMixin, RedirectView):
     query_string = True
 
     def redirect_to_app(self, request: HttpRequest):
-        if request.user.is_authenticated and request.user.type in (
-            UserTypes.EXTERNAL,
-            UserTypes.SERVICE_ACCOUNT,
-            UserTypes.INTERNAL_SERVICE_ACCOUNT,
+        if request.user.is_authenticated and (
+            request.user.type == UserTypes.EXTERNAL
+            or matches_user_type(
+                request.user, service_accounts=True, internal_service_accounts=True, agents=True
+            )
         ):
             brand: Brand = request.brand
             if brand.default_application:
@@ -72,10 +74,11 @@ class BrandDefaultRedirectView(InterfaceView):
     """By default redirect to default app"""
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if request.user.is_authenticated and request.user.type in (
-            UserTypes.EXTERNAL,
-            UserTypes.SERVICE_ACCOUNT,
-            UserTypes.INTERNAL_SERVICE_ACCOUNT,
+        if request.user.is_authenticated and (
+            request.user.type == UserTypes.EXTERNAL
+            or matches_user_type(
+                request.user, service_accounts=True, internal_service_accounts=True, agents=True
+            )
         ):
             brand: Brand = request.brand
             if brand.default_application:

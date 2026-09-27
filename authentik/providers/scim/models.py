@@ -13,7 +13,8 @@ from rest_framework.serializers import Serializer
 from structlog.stdlib import get_logger
 
 from authentik.core.apps import AppAccessWithoutBindings
-from authentik.core.models import BackchannelProvider, Group, PropertyMapping, User, UserTypes
+from authentik.core.models import BackchannelProvider, Group, PropertyMapping, User
+from authentik.core.user_types import user_type_filter
 from authentik.lib.models import InternallyManagedMixin, SerializerModel, SimpleThroughModel
 from authentik.lib.sync.outgoing.base import BaseOutgoingSyncClient
 from authentik.lib.sync.outgoing.models import OutgoingSyncProvider
@@ -205,8 +206,10 @@ class SCIMProvider(OutgoingSyncProvider, BackchannelProvider):
             # according to the provider's settings
             base = User.objects.all().exclude_anonymous().filter(**kwargs)
             if self.exclude_users_service_account:
-                base = base.exclude(type=UserTypes.SERVICE_ACCOUNT).exclude(
-                    type=UserTypes.INTERNAL_SERVICE_ACCOUNT
+                base = base.exclude(
+                    user_type_filter(
+                        service_accounts=True, internal_service_accounts=True, agents=True
+                    )
                 )
 
             # Filter users by their access to the backchannel application if an application is set

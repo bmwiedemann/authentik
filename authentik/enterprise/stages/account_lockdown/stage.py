@@ -10,8 +10,9 @@ from dramatiq.actor import Actor
 from dramatiq.composition import group
 from dramatiq.results.errors import ResultTimeout
 
-from authentik.core.models import User, UserTypes
+from authentik.core.models import User
 from authentik.core.signals import deactivation_inhibit_cleanup
+from authentik.core.user_types import user_type_filter
 from authentik.enterprise.core.revocation import revoke_user_access
 from authentik.enterprise.stages.account_lockdown.models import AccountLockdownStage
 from authentik.events.models import Event, EventAction
@@ -35,7 +36,9 @@ SELF_SERVICE_COMPLETION_FLOW_REQUIRED_MESSAGE = _(
 
 def get_lockdown_target_users() -> QuerySet[User]:
     """Return users that can be targeted by account lockdown."""
-    return User.objects.exclude_anonymous().exclude(type=UserTypes.INTERNAL_SERVICE_ACCOUNT)
+    return User.objects.exclude_anonymous().exclude(
+        user_type_filter(internal_service_accounts=True)
+    )
 
 
 def can_lock_user(actor, user: User) -> bool:
