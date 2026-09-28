@@ -5,7 +5,7 @@ from itertools import product
 from django.test import TestCase
 
 from authentik.core.models import Actor, ActorPolicyInheritance, User, UserTypes
-from authentik.core.user_types import matches_user_type, user_type_filter
+from authentik.core.user_types import matches_user_type
 from authentik.enterprise.agents.models import Agent
 
 
@@ -45,9 +45,8 @@ class UserRestrictionTests(TestCase):
                     expected = flags.get(self.categories[user.pk], False)
                     self.assertEqual(matches_user_type(user, **flags), expected)
 
-    def test_user_type_filter(self):
-        """Querysets retain precisely the allowed categories for all flag combinations."""
-        users = User.objects.filter(pk__in=self.categories)
+    def test_exclude_user_types(self):
+        """Manager and chained queryset calls retain precisely the allowed categories."""
         for values in product((False, True), repeat=3):
             flags = dict(
                 zip(
@@ -57,8 +56,13 @@ class UserRestrictionTests(TestCase):
             expected = {
                 pk for pk, category in self.categories.items() if not flags.get(category, False)
             }
-            with self.subTest(flags=flags), self.assertNumQueries(1):
-                self.assertSetEqual(
-                    set(users.exclude(user_type_filter(**flags)).values_list("pk", flat=True)),
-                    expected,
-                )
+            for users in (User.objects, User.objects.filter(pk__in=self.categories)):
+                with self.subTest(flags=flags, entrypoint=type(users)), self.assertNumQueries(1):
+                    self.assertSetEqual(
+                        set(
+                            users.exclude_user_types(**flags)
+                            .filter(pk__in=self.categories)
+                            .values_list("pk", flat=True)
+                        ),
+                        expected,
+                    )

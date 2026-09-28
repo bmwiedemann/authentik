@@ -17,7 +17,6 @@ from authentik.core.models import (
     PropertyMapping,
     User,
 )
-from authentik.core.user_types import user_type_filter
 from authentik.lib.models import InternallyManagedMixin, SerializerModel, SimpleThroughModel
 from authentik.lib.sync.outgoing.base import BaseOutgoingSyncClient
 from authentik.lib.sync.outgoing.models import OutgoingSyncDeleteAction, OutgoingSyncProvider
@@ -131,10 +130,8 @@ class MicrosoftEntraProvider(OutgoingSyncProvider, BackchannelProvider):
             # according to the provider's settings
             base = User.objects.all().exclude_anonymous().filter(**kwargs)
             if self.exclude_users_service_account:
-                base = base.exclude(
-                    user_type_filter(
-                        service_accounts=True, internal_service_accounts=True, agents=True
-                    )
+                base = base.exclude_user_types(
+                    service_accounts=True, internal_service_accounts=True, agents=True
                 )
             if self.filter_group:
                 base = base.filter(groups__in=[self.filter_group])

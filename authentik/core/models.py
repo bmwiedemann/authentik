@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pgtrigger
 from deepmerge import always_merger
+from django.apps import apps
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.models import AbstractUser, Permission
 from django.contrib.auth.models import UserManager as DjangoUserManager
@@ -346,21 +347,31 @@ class UserQuerySet(models.QuerySet):
         """Exclude anonymous user"""
         return self.exclude(**{User.USERNAME_FIELD: settings.ANONYMOUS_USER_NAME})
 
+    def exclude_user_types(
+        self,
+        *,
+        service_accounts: bool = False,
+        internal_service_accounts: bool = False,
+        agents: bool = False,
+    ) -> Self:
+        """Exclude selected categories, treating agents separately from service accounts."""
+        selected = Q(pk__in=[])
+        if internal_service_accounts:
+            selected |= Q(type=UserTypes.INTERNAL_SERVICE_ACCOUNT)
+        if service_accounts == agents or not apps.is_installed("authentik.enterprise.agents"):
+            if service_accounts:
+                selected |= Q(type=UserTypes.SERVICE_ACCOUNT)
+        elif service_accounts or agents:
+            selected |= Q(type=UserTypes.SERVICE_ACCOUNT, actor__agent__isnull=not agents)
+        return self.exclude(selected)
 
-class UserManager(DjangoUserManager):
+
+class UserManager(DjangoUserManager.from_queryset(UserQuerySet)):
     """User manager that doesn't assign is_superuser and is_staff"""
-
-    def get_queryset(self):
-        """Create special user queryset"""
-        return UserQuerySet(self.model, using=self._db)
 
     def create_user(self, username, email=None, password=None, **extra_fields):
         """User manager that doesn't assign is_superuser and is_staff"""
         return self._create_user(username, email, password, **extra_fields)
-
-    def exclude_anonymous(self) -> QuerySet:
-        """Exclude anonymous user"""
-        return self.get_queryset().exclude_anonymous()
 
 
 class User(SerializerModel, AttributesMixin, AbstractUser):

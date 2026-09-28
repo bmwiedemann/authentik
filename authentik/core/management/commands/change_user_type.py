@@ -1,7 +1,6 @@
 """Change user type"""
 
 from authentik.core.models import User, UserTypes
-from authentik.core.user_types import user_type_filter
 from authentik.tenants.management import TenantCommand
 
 
@@ -15,8 +14,8 @@ class Command(TenantCommand):
 
     def handle_per_tenant(self, **options):
         new_type = UserTypes(options["type"])
-        qs = User.objects.exclude_anonymous().exclude(
-            user_type_filter(service_accounts=True, internal_service_accounts=True, agents=True)
+        qs = User.objects.exclude_anonymous().exclude_user_types(
+            service_accounts=True, internal_service_accounts=True, agents=True
         )
         if options["usernames"] and options["all"]:
             self.stderr.write("--all and usernames specified, only one can be specified")
