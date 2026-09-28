@@ -90,7 +90,6 @@ from authentik.core.models import (
     default_token_duration,
 )
 from authentik.core.signals import impersonation_changed
-from authentik.core.user_types import matches_user_type
 from authentik.core.views.user_switch import start_user_switch_flow
 from authentik.endpoints.connectors.agent.auth import AgentAuth
 from authentik.events.models import Event, EventAction
@@ -277,12 +276,8 @@ class UserSerializer(AttributesMixinSerializer, ModelSerializer):
         if not self.instance and user_type == UserTypes.INTERNAL_SERVICE_ACCOUNT:
             raise ValidationError(_("Can't create internal service accounts"))
         if self.instance:
-            if (
-                self.instance.type == UserTypes.INTERNAL_SERVICE_ACCOUNT
-                and user_type != UserTypes.INTERNAL_SERVICE_ACCOUNT.value
-            ) or (
-                self.instance.type != UserTypes.INTERNAL_SERVICE_ACCOUNT
-                and user_type == UserTypes.INTERNAL_SERVICE_ACCOUNT.value
+            if self.instance.matches_user_type(internal_service_accounts=True) != (
+                user_type == UserTypes.INTERNAL_SERVICE_ACCOUNT
             ):
                 raise ValidationError(
                     _("Can't change internal service account to other user type.")
@@ -327,7 +322,7 @@ class UserSerializer(AttributesMixinSerializer, ModelSerializer):
             and attrs.get("password_hash") is not None
         ):
             raise ValidationError(_("Cannot set both password and password_hash. Use only one."))
-        if self.instance and matches_user_type(self.instance, internal_service_accounts=True):
+        if self.instance and self.instance.matches_user_type(internal_service_accounts=True):
             raise ValidationError(_("Can't modify internal service account users"))
         return super().validate(attrs)
 

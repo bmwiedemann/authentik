@@ -12,7 +12,6 @@ from rest_framework.request import Request
 from rest_framework.views import APIView
 
 from authentik.api.authentication import validate_auth
-from authentik.core.models import UserTypes
 from authentik.lib.tracing import active_tracer
 
 
@@ -91,7 +90,9 @@ class ObjectFilter(ObjectPermissionsFilter):
         # Outposts (which are the only objects using internal service accounts)
         # except requests to return an empty list when they have no objects
         # assigned
-        if getattr(request.user, "type", None) == UserTypes.INTERNAL_SERVICE_ACCOUNT:
+        if request.user.is_authenticated and request.user.matches_user_type(
+            internal_service_accounts=True
+        ):
             return queryset
         if not queryset.exists():
             # User doesn't have direct permission to all objects

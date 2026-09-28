@@ -20,7 +20,7 @@ from jwt import PyJWTError, decode, encode
 from structlog.stdlib import get_logger
 
 from authentik.core import user_switching
-from authentik.core.models import Token, TokenIntents, User, UserTypes
+from authentik.core.models import Token, TokenIntents, User
 from authentik.lib.config import CONFIG
 from authentik.lib.tracing import active_tracer
 from authentik.lib.utils.crypto import get_cookie_signing_key
@@ -263,7 +263,7 @@ class ClientIPMiddleware:
             LOGGER.warning("Attempted remote-ip override without token", delegated_ip=delegated_ip)
             return None
         user: User = token.user
-        if user.type != UserTypes.INTERNAL_SERVICE_ACCOUNT:
+        if not user.matches_user_type(internal_service_accounts=True):
             LOGGER.warning(
                 "Remote-IP override: user doesn't have permission",
                 user=user,

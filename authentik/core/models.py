@@ -347,14 +347,14 @@ class UserQuerySet(models.QuerySet):
         """Exclude anonymous user"""
         return self.exclude(**{User.USERNAME_FIELD: settings.ANONYMOUS_USER_NAME})
 
-    def exclude_user_types(
+    def _user_type_filter(
         self,
         *,
         service_accounts: bool = False,
         internal_service_accounts: bool = False,
         agents: bool = False,
-    ) -> Self:
-        """Exclude selected categories, treating agents separately from service accounts."""
+    ) -> Q:
+        """Select categories, treating agents separately from service accounts."""
         selected = Q(pk__in=[])
         if internal_service_accounts:
             selected |= Q(type=UserTypes.INTERNAL_SERVICE_ACCOUNT)
@@ -363,7 +363,39 @@ class UserQuerySet(models.QuerySet):
                 selected |= Q(type=UserTypes.SERVICE_ACCOUNT)
         elif service_accounts or agents:
             selected |= Q(type=UserTypes.SERVICE_ACCOUNT, actor__agent__isnull=not agents)
-        return self.exclude(selected)
+        return selected
+
+    def filter_user_types(
+        self,
+        *,
+        service_accounts: bool = False,
+        internal_service_accounts: bool = False,
+        agents: bool = False,
+    ) -> Self:
+        """Include only the selected user categories."""
+        return self.filter(
+            self._user_type_filter(
+                service_accounts=service_accounts,
+                internal_service_accounts=internal_service_accounts,
+                agents=agents,
+            )
+        )
+
+    def exclude_user_types(
+        self,
+        *,
+        service_accounts: bool = False,
+        internal_service_accounts: bool = False,
+        agents: bool = False,
+    ) -> Self:
+        """Exclude the selected user categories."""
+        return self.exclude(
+            self._user_type_filter(
+                service_accounts=service_accounts,
+                internal_service_accounts=internal_service_accounts,
+                agents=agents,
+            )
+        )
 
 
 class UserManager(DjangoUserManager.from_queryset(UserQuerySet)):
@@ -425,6 +457,27 @@ class User(SerializerModel, AttributesMixin, AbstractUser):
     def default_path() -> str:
         """Get the default user path"""
         return User._meta.get_field("path").default
+
+    def matches_user_type(
+        self,
+        *,
+        service_accounts: bool = False,
+        internal_service_accounts: bool = False,
+        agents: bool = False,
+    ) -> bool:
+        """Match selected categories, treating agents separately from service accounts.
+
+        Agents have the service-account type, but are selected only by `agents`.
+        Ordinary service accounts, including other actors, use `service_accounts`.
+        """
+        if self.type == UserTypes.INTERNAL_SERVICE_ACCOUNT:
+            return internal_service_accounts
+        if self.type != UserTypes.SERVICE_ACCOUNT:
+            return False
+        if service_accounts == agents:
+            return service_accounts
+        is_agent = hasattr(self, "actor") and hasattr(self.actor, "agent")
+        return agents if is_agent else service_accounts
 
     def all_groups(self) -> QuerySet[Group]:
         """Recursively get all groups this user is a member of."""

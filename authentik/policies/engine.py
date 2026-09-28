@@ -12,7 +12,7 @@ from django.http import HttpRequest
 from django.utils.timezone import now
 from structlog.stdlib import BoundLogger, get_logger
 
-from authentik.core.models import Actor, ActorPolicyInheritance, Group, User, UserTypes
+from authentik.core.models import Actor, ActorPolicyInheritance, Group, User
 from authentik.lib.tracing import active_tracer
 from authentik.lib.utils.reflection import class_to_path
 from authentik.policies.apps import HIST_POLICIES_ENGINE_TOTAL_TIME, HIST_POLICIES_EXECUTION_TIME
@@ -23,10 +23,6 @@ from authentik.policies.types import PolicyRequest, PolicyResult
 
 CURRENT_PROCESS = current_process()
 
-# Actors are always service accounts, so a cheap type check keeps the hot policy path free of an
-# extra query for ordinary (human) users.
-_ACTOR_USER_TYPES = frozenset({UserTypes.SERVICE_ACCOUNT, UserTypes.INTERNAL_SERVICE_ACCOUNT})
-
 
 def _get_mirror_parent(user: User) -> User | None:
     """Return the parent a MIRROR actor mirrors its policy from, or None.
@@ -35,7 +31,9 @@ def _get_mirror_parent(user: User) -> User | None:
     exactly when the parent does. Detection resolves the multi-table-inheritance child, memoized
     on the user instance.
     """
-    if getattr(user, "type", None) not in _ACTOR_USER_TYPES:
+    if not user.is_authenticated or not user.matches_user_type(
+        service_accounts=True, internal_service_accounts=True, agents=True
+    ):
         return None
     if "_actor" not in user.__dict__:
         user.__dict__["_actor"] = Actor.objects.filter(pk=user.pk).first()
@@ -332,7 +330,9 @@ class FilterPolicyEngine[T: PolicyBindingModel](_PolicyEngineBase):
         service accounts can be actors, so the scan is a cheap, targeted query, and parents that
         are shared across actors are evaluated once.
         """
-        for actor in self.__original_users.filter(type__in=_ACTOR_USER_TYPES):
+        for actor in self.__original_users.filter_user_types(
+            service_accounts=True, internal_service_accounts=True, agents=True
+        ):
             effective = effective_policy_user(actor)
             if effective.pk != actor.pk:
                 self.__mirror_of[actor.pk] = effective

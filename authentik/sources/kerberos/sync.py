@@ -11,7 +11,7 @@ from authentik.core.expression.exceptions import (
     PropertyMappingExpressionException,
     SkipObjectException,
 )
-from authentik.core.models import Group, User, UserTypes
+from authentik.core.models import Group, User
 from authentik.core.sources.mapper import SourceMapper
 from authentik.core.sources.matcher import Action, SourceMatcher
 from authentik.events.models import Event, EventAction
@@ -95,7 +95,7 @@ class KerberosSync:
 
             if action == Action.ENROLL:
                 user = User.objects.create(**defaults)
-                if user.type == UserTypes.INTERNAL_SERVICE_ACCOUNT:
+                if user.matches_user_type(internal_service_accounts=True):
                     user.set_unusable_password()
                     user.save()
                 connection.user = user

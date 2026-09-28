@@ -4,8 +4,8 @@ from itertools import product
 
 from django.test import TestCase
 
+from authentik.api.authentication import IPCUser, VirtualUser
 from authentik.core.models import Actor, ActorPolicyInheritance, User, UserTypes
-from authentik.core.user_types import matches_user_type
 from authentik.enterprise.agents.models import Agent
 
 
@@ -43,10 +43,10 @@ class UserRestrictionTests(TestCase):
             for user in [*users, self.agent, self.actor]:
                 with self.subTest(flags=flags, user=user.username):
                     expected = flags.get(self.categories[user.pk], False)
-                    self.assertEqual(matches_user_type(user, **flags), expected)
+                    self.assertEqual(user.matches_user_type(**flags), expected)
 
-    def test_exclude_user_types(self):
-        """Manager and chained queryset calls retain precisely the allowed categories."""
+    def test_user_type_querysets(self):
+        """Manager and chained queryset calls select precisely the requested categories."""
         for values in product((False, True), repeat=3):
             flags = dict(
                 zip(
@@ -57,12 +57,37 @@ class UserRestrictionTests(TestCase):
                 pk for pk, category in self.categories.items() if not flags.get(category, False)
             }
             for users in (User.objects, User.objects.filter(pk__in=self.categories)):
-                with self.subTest(flags=flags, entrypoint=type(users)), self.assertNumQueries(1):
+                with self.subTest(flags=flags, entrypoint=type(users)):
                     self.assertSetEqual(
                         set(
-                            users.exclude_user_types(**flags)
+                            users.filter_user_types(**flags)
                             .filter(pk__in=self.categories)
                             .values_list("pk", flat=True)
                         ),
-                        expected,
+                        set(self.categories) - expected,
+                    )
+                    with self.assertNumQueries(1):
+                        self.assertSetEqual(
+                            set(
+                                users.exclude_user_types(**flags)
+                                .filter(pk__in=self.categories)
+                                .values_list("pk", flat=True)
+                            ),
+                            expected,
+                        )
+
+    def test_virtual_user_types(self):
+        """Virtual authentication identities remain internal service accounts."""
+        for user in (VirtualUser(), IPCUser()):
+            for values in product((False, True), repeat=3):
+                flags = dict(
+                    zip(
+                        ("service_accounts", "internal_service_accounts", "agents"),
+                        values,
+                        strict=True,
+                    )
+                )
+                with self.subTest(user=type(user), flags=flags), self.assertNumQueries(0):
+                    self.assertEqual(
+                        user.matches_user_type(**flags), flags["internal_service_accounts"]
                     )

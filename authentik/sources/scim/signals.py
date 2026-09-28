@@ -39,6 +39,6 @@ def scim_source_post_save(sender: type[Model], instance: SCIMSource, created: bo
 @receiver(post_delete, sender=SCIMSource)
 def scim_source_post_delete(sender: type[Model], instance: SCIMSource, **_):
     """Delete SCIM Source service account after deleting source"""
-    User.objects.filter(
-        username=instance.service_account_identifier, type=UserTypes.INTERNAL_SERVICE_ACCOUNT
+    User.objects.filter_user_types(internal_service_accounts=True).filter(
+        username=instance.service_account_identifier
     ).delete()

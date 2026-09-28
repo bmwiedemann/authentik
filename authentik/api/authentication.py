@@ -48,6 +48,7 @@ def validate_auth(header: bytes, format="bearer") -> str | None:
 
 class VirtualUser(AnonymousUser):
     is_active = True
+    matches_user_type = User.matches_user_type
 
     @property
     def type(self):

@@ -3,7 +3,7 @@
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 
-from authentik.core.models import User, UserTypes
+from authentik.core.models import User
 from authentik.outposts.models import USER_PREFIX_OUTPOSTS
 from authentik.root.middleware import ClientIPMiddleware
 
@@ -12,7 +12,7 @@ def is_outpost_service_account(user: User | None) -> bool:
     """Check if `user` is the service account of an outpost"""
     if not user or not user.is_authenticated:
         return False
-    if user.type != UserTypes.INTERNAL_SERVICE_ACCOUNT:
+    if not user.matches_user_type(internal_service_accounts=True):
         return False
     return user.username.startswith(USER_PREFIX_OUTPOSTS)
 

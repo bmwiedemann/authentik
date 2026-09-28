@@ -23,7 +23,7 @@ from guardian.conf import settings
 from guardian.shortcuts import get_anonymous_user
 
 from authentik.blueprints.v1.common import YAMLTag
-from authentik.core.models import User, UserTypes
+from authentik.core.models import User
 from authentik.events.context_processors.asn import ASN_CONTEXT_PROCESSOR
 from authentik.events.context_processors.geoip import GEOIP_CONTEXT_PROCESSOR
 from authentik.policies.types import PolicyRequest
@@ -95,7 +95,7 @@ def get_user(user: User | AnonymousUser) -> dict[str, Any]:
         user_data["is_anonymous"] = True
     # Actions performed by an actor are recorded on behalf of its parent, so the
     # audit log always ties the activity back to a responsible human.
-    if getattr(user, "type", None) == UserTypes.SERVICE_ACCOUNT and hasattr(user, "actor"):
+    if user.matches_user_type(service_accounts=True, agents=True) and hasattr(user, "actor"):
         user_data["is_agent"] = True
         # An actor without an owner acts for itself, so there is nobody to attribute to
         if user.actor.parent:

@@ -33,7 +33,6 @@ from structlog.stdlib import get_logger
 from authentik.api.validation import validate
 from authentik.core.api.used_by import UsedByMixin
 from authentik.core.api.utils import ModelSerializer, PassiveSerializer
-from authentik.core.models import UserTypes
 from authentik.crypto.apps import MANAGED_KEY
 from authentik.crypto.builder import CertificateBuilder, PrivateKeyAlg
 from authentik.crypto.models import CertificateKeyPair, KeyType
@@ -259,7 +258,7 @@ class CertificateKeyPairViewSet(UsedByMixin, ModelViewSet):
     def view_certificate(self, request: Request, pk: str) -> Response:
         """Return certificate-key pairs certificate and log access"""
         certificate: CertificateKeyPair = self.get_object()
-        if request.user.type != UserTypes.INTERNAL_SERVICE_ACCOUNT:
+        if not request.user.matches_user_type(internal_service_accounts=True):
             Event.new(  # noqa # nosec
                 EventAction.SECRET_VIEW,
                 secret=certificate,
@@ -291,7 +290,7 @@ class CertificateKeyPairViewSet(UsedByMixin, ModelViewSet):
     def view_private_key(self, request: Request, pk: str) -> Response:
         """Return certificate-key pairs private key and log access"""
         certificate: CertificateKeyPair = self.get_object()
-        if request.user.type != UserTypes.INTERNAL_SERVICE_ACCOUNT:
+        if not request.user.matches_user_type(internal_service_accounts=True):
             Event.new(  # noqa # nosec
                 EventAction.SECRET_VIEW,
                 secret=certificate,
