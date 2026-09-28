@@ -236,10 +236,10 @@ jobs:
       - name: Fetch container images
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v5
         with:
-          name: container-build-server-debug-amd64
+          name: container-build-server-amd64
       - name: Load container images
         run: |
-          skopeo copy "oci-archive:container/server-debug-amd64.oci.tar" "docker-daemon:authentik.invalid/goauthentik/server-debug:${{ needs.check-inputs.outputs.version }}"
+          skopeo copy "oci-archive:container/server-amd64.oci.tar" "docker-daemon:authentik.invalid/goauthentik/server:${{ needs.check-inputs.outputs.version }}"
           rm -rf container/
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
@@ -247,7 +247,7 @@ jobs:
       - name: Run test in Docker
         env:
           COMPOSE_PROJECT_NAME: authentik-release-test
-          AUTHENTIK_IMAGE: authentik.invalid/goauthentik/server-debug
+          AUTHENTIK_IMAGE: authentik.invalid/goauthentik/server
           AUTHENTIK_TAG: "${{ needs.check-inputs.outputs.version }}"
         run: ./scripts/test_docker.sh
   create-release:
