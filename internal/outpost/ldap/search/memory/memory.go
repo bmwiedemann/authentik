@@ -11,6 +11,7 @@ import (
 
 	"beryju.io/ldap"
 	"github.com/getsentry/sentry-go"
+	ber "github.com/nmcclain/asn1-ber"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"goauthentik.io/internal/config"
@@ -34,6 +35,12 @@ type snapshot struct {
 	users     []api.User
 	groups    []api.Group
 	usersByPk map[int32]int // index into users
+	// Lookup indexes keyed by lower-cased value, so that base-DN lookups and
+	// simple equality filters don't build an entry for every object in the
+	// directory. See candidates.go.
+	usersByUsername map[string]int
+	usersByEmail    map[string][]int
+	groupsByName    map[string]int
 }
 
 type MemorySearcher struct {
@@ -90,15 +97,7 @@ func (ms *MemorySearcher) fetch() {
 		return
 	}
 	ms.log.WithField("users", len(users)).WithField("groups", len(groups)).WithField("took", time.Since(start).String()).Info("fetched directory")
-	usersByPk := make(map[int32]int, len(users))
-	for i, u := range users {
-		usersByPk[u.Pk] = i
-	}
-	ms.cache.Store(&snapshot{
-		users:     users,
-		groups:    groups,
-		usersByPk: usersByPk,
-	})
+	ms.cache.Store(newSnapshot(users, groups))
 }
 
 func (ms *MemorySearcher) SearchBase(req *search.Request) (ldap.ServerSearchResult, error) {
@@ -172,9 +171,23 @@ func (ms *MemorySearcher) Search(req *search.Request) (ldap.ServerSearchResult, 
 	var groups []*group.LDAPGroup
 	var err error
 
+	// The filter is only used to narrow the candidates; the LDAP server
+	// library applies it in full to the returned entries. A filter that
+	// doesn't parse therefore just means every object is a candidate.
+	var filter *ber.Packet
+	if needUsers || needGroups {
+		if parsed, ferr := ldap.CompileFilter(req.Filter); ferr == nil {
+			filter = parsed
+		}
+	}
+
 	if needUsers {
 		if flag.CanSearch {
-			users = &snap.users
+			if candidates, ok := snap.userCandidates(req.BaseDN, filter, ms.si); ok {
+				users = &candidates
+			} else {
+				users = &snap.users
+			}
 		} else {
 			if idx, ok := snap.usersByPk[flag.UserPk]; ok {
 				u := []api.User{snap.users[idx]}
@@ -187,27 +200,21 @@ func (ms *MemorySearcher) Search(req *search.Request) (ldap.ServerSearchResult, 
 	}
 
 	if needGroups {
-		groups = make([]*group.LDAPGroup, 0)
-
-		for _, g := range snap.groups {
-			if flag.CanSearch {
-				groups = append(groups, group.FromAPIGroup(g, ms.si))
-			} else {
-				// If the user cannot search, we're going to only return
-				// the groups they're in _and_ only return themselves
-				// as a member.
-				for _, u := range g.UsersObj {
-					if flag.UserPk == u.Pk {
-						// TODO: Is there a better way to clone this object?
-						fg := api.NewGroup(g.Pk, g.NumPk, g.Name, []api.RelatedGroup{}, []api.PartialUser{u}, []api.Role{}, nil, []string{}, []api.RelatedGroup{})
-						fg.SetUsers([]int32{flag.UserPk})
-						fg.SetAttributes(g.Attributes)
-						fg.SetIsSuperuser(*g.IsSuperuser)
-						groups = append(groups, group.FromAPIGroup(*fg, ms.si))
-						break
-					}
-				}
+		var candidates []api.Group
+		if flag.CanSearch {
+			var ok bool
+			if candidates, ok = snap.groupCandidates(req.BaseDN, filter, ms.si); !ok {
+				candidates = snap.groups
 			}
+		} else {
+			// If the user cannot search, we're going to only return
+			// the groups they're in _and_ only return themselves
+			// as a member.
+			candidates = snap.groupsOfUser(flag.UserPk)
+		}
+		groups = make([]*group.LDAPGroup, 0, len(candidates))
+		for _, g := range candidates {
+			groups = append(groups, group.FromAPIGroup(g, ms.si))
 		}
 	}
 
