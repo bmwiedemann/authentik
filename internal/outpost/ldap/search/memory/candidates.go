@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"beryju.io/ldap"
-	goldap "github.com/go-ldap/ldap/v3"
 	ber "github.com/nmcclain/asn1-ber"
 	"goauthentik.io/internal/outpost/ldap/constants"
 	"goauthentik.io/internal/outpost/ldap/server"
@@ -36,19 +35,6 @@ func newSnapshot(users []api.User, groups []api.Group) *snapshot {
 		s.groupsByName[strings.ToLower(g.Name)] = i
 	}
 	return s
-}
-
-// firstRDN returns the attribute name and value of the first RDN of dn, and
-// the value of the second RDN (the OU in this outpost's tree, if any).
-func firstRDN(dn string) (attr string, value string, ou string, ok bool) {
-	parsed, err := goldap.ParseDN(dn)
-	if err != nil || len(parsed.RDNs) == 0 || len(parsed.RDNs[0].Attributes) == 0 {
-		return "", "", "", false
-	}
-	if len(parsed.RDNs) > 1 && len(parsed.RDNs[1].Attributes) > 0 {
-		ou = parsed.RDNs[1].Attributes[0].Value
-	}
-	return parsed.RDNs[0].Attributes[0].Type, parsed.RDNs[0].Attributes[0].Value, ou, true
 }
 
 // equalityMatch returns the attribute name (lower-cased) and value of an
@@ -128,7 +114,7 @@ func narrow(f *ber.Packet, lookup func(attr string, value string) ([]int, bool))
 func (s *snapshot) userCandidates(baseDN string, filter *ber.Packet, si server.LDAPServerInstance) ([]api.User, bool) {
 	// A base DN below ou=users or ou=virtual-groups names exactly one user.
 	if utils.HasSuffixNoCase(baseDN, ","+si.GetBaseUserDN()) || utils.HasSuffixNoCase(baseDN, ","+si.GetBaseVirtualGroupDN()) {
-		if _, cn, _, ok := firstRDN(baseDN); ok {
+		if _, cn, _, ok := utils.FirstRDN(baseDN); ok {
 			return s.usersAt(s.lookupUsername(cn)), true
 		}
 	}
@@ -142,7 +128,7 @@ func (s *snapshot) userCandidates(baseDN string, filter *ber.Packet, si server.L
 		case "mail":
 			return s.usersByEmail[strings.ToLower(value)], true
 		case "memberof":
-			_, name, ou, ok := firstRDN(value)
+			_, name, ou, ok := utils.FirstRDN(value)
 			if !ok {
 				return nil, false
 			}
@@ -176,7 +162,7 @@ func (s *snapshot) userCandidates(baseDN string, filter *ber.Packet, si server.L
 // with the given filter, or false if all groups are candidates.
 func (s *snapshot) groupCandidates(baseDN string, filter *ber.Packet, si server.LDAPServerInstance) ([]api.Group, bool) {
 	if utils.HasSuffixNoCase(baseDN, ","+si.GetBaseGroupDN()) {
-		if _, cn, _, ok := firstRDN(baseDN); ok {
+		if _, cn, _, ok := utils.FirstRDN(baseDN); ok {
 			return s.groupsAt(s.lookupGroupName(cn)), true
 		}
 	}
@@ -188,7 +174,7 @@ func (s *snapshot) groupCandidates(baseDN string, filter *ber.Packet, si server.
 		case "cn", "samaccountname":
 			return s.lookupGroupName(value), true
 		case "member":
-			_, name, ou, ok := firstRDN(value)
+			_, name, ou, ok := utils.FirstRDN(value)
 			if !ok {
 				return nil, false
 			}
