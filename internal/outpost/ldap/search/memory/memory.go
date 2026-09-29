@@ -25,6 +25,7 @@ import (
 	"goauthentik.io/internal/outpost/ldap/server"
 	"goauthentik.io/internal/outpost/ldap/utils"
 	api "goauthentik.io/packages/client-go"
+	"golang.org/x/sync/errgroup"
 )
 
 // snapshot is an immutable view of the directory. Every fetch replaces it
@@ -78,22 +79,32 @@ func (ms *MemorySearcher) fetch() {
 	ms.fetchMutex.Lock()
 	defer ms.fetchMutex.Unlock()
 	start := time.Now()
+	// Users and groups are independent lists, so fetch them at the same
+	// time. Roles are never used for LDAP entries, so they're left out of the
+	// user payload.
+	var users []api.User
+	var groups []api.Group
+	errs, ctx := errgroup.WithContext(context.Background())
+	errs.Go(func() error {
+		var err error
+		users, err = ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreUsersList(ctx).IncludeGroups(true).IncludeRoles(false), ak.PaginatorOptions{
+			PageSize: config.Get().LDAP.PageSize,
+			Logger:   ms.log,
+		})
+		return err
+	})
+	errs.Go(func() error {
+		var err error
+		groups, err = ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreGroupsList(ctx).IncludeUsers(true).IncludeChildren(true).IncludeParents(true), ak.PaginatorOptions{
+			PageSize: config.Get().LDAP.PageSize,
+			Logger:   ms.log,
+		})
+		return err
+	})
 	// A failed or partial fetch must not replace a complete snapshot, or a
 	// single API error would empty the directory until the next refresh.
-	users, err := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreUsersList(context.TODO()).IncludeGroups(true), ak.PaginatorOptions{
-		PageSize: config.Get().LDAP.PageSize,
-		Logger:   ms.log,
-	})
-	if err != nil {
-		ms.log.WithError(err).Warning("failed to fetch users, keeping previous snapshot")
-		return
-	}
-	groups, err := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreGroupsList(context.TODO()).IncludeUsers(true).IncludeChildren(true).IncludeParents(true), ak.PaginatorOptions{
-		PageSize: config.Get().LDAP.PageSize,
-		Logger:   ms.log,
-	})
-	if err != nil {
-		ms.log.WithError(err).Warning("failed to fetch groups, keeping previous snapshot")
+	if err := errs.Wait(); err != nil {
+		ms.log.WithError(err).Warning("failed to fetch directory, keeping previous snapshot")
 		return
 	}
 	ms.log.WithField("users", len(users)).WithField("groups", len(groups)).WithField("took", time.Since(start).String()).Info("fetched directory")

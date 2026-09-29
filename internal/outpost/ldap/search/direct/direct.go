@@ -110,7 +110,7 @@ func (ds *DirectSearcher) Search(req *search.Request) (ldap.ServerSearchResult, 
 		errs.Go(func() error {
 			if flags.CanSearch {
 				uapisp := sentry.StartSpan(errCtx, "authentik.providers.ldap.search.api_user")
-				searchReq, skip := utils.ParseFilterForUser(ds.si.GetAPIClient().CoreAPI.CoreUsersList(uapisp.Context()).IncludeGroups(true), parsedFilter, false)
+				searchReq, skip := utils.ParseFilterForUser(ds.si.GetAPIClient().CoreAPI.CoreUsersList(uapisp.Context()).IncludeGroups(true).IncludeRoles(false), parsedFilter, false)
 
 				if skip {
 					req.Log().Trace("Skip backend request")
