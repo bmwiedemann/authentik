@@ -134,7 +134,7 @@ func memGroup(pk string, numPk int32, name string, users []api.PartialUser) api.
 	}
 }
 
-func memNewAPIClient(t *testing.T, dir *memDirectory) (*api.APIClient, func()) {
+func memNewAPIClient(t testing.TB, dir *memDirectory) (*api.APIClient, func()) {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v3/core/users/", func(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +188,7 @@ func memProviderInstance(client *api.APIClient) *ProviderInstance {
 	}
 }
 
-func memSelfSearch(t *testing.T, searcher *memory.MemorySearcher) *ldap.Entry {
+func memSelfSearch(t testing.TB, searcher *memory.MemorySearcher) *ldap.Entry {
 	t.Helper()
 	client, server := net.Pipe()
 	defer func() {
@@ -214,7 +214,7 @@ func memSelfSearch(t *testing.T, searcher *memory.MemorySearcher) *ldap.Entry {
 	return res.Entries[0]
 }
 
-func memAssertAttribute(t *testing.T, attrs []*ldap.EntryAttribute, expected *ldap.EntryAttribute) {
+func memAssertAttribute(t testing.TB, attrs []*ldap.EntryAttribute, expected *ldap.EntryAttribute) {
 	t.Helper()
 	for _, attr := range attrs {
 		if attr.Name == expected.Name {
