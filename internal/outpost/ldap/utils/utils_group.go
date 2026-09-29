@@ -45,12 +45,12 @@ func parseFilterForGroupSingle(req api.ApiCoreGroupsListRequest, f *ber.Packet) 
 		return req, false
 	}
 	// Check key
+	// Only "member" maps to an API filter. A group's memberOf (its parents)
+	// has no API filter, so it is left to the LDAP server library.
 	switch strings.ToLower(k.(string)) {
-	case "cn":
+	case "cn", "samaccountname":
 		return req.Name(*val), false
 	case "member":
-		fallthrough
-	case "memberOf":
 		userDN, err := goldap.ParseDN(*val)
 		if err != nil {
 			return req.MembersByUsername([]string{*val}), false
