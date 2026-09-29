@@ -114,6 +114,13 @@ func (ds *DirectSearcher) Search(req *search.Request) (ldap.ServerSearchResult, 
 			if flags.CanSearch {
 				uapisp := sentry.StartSpan(errCtx, "authentik.providers.ldap.search.api_user")
 				searchReq, skip := utils.ParseFilterForUser(c.CoreAPI.CoreUsersList(uapisp.Context()).IncludeGroups(true).IncludeRoles(false), parsedFilter, false)
+				// A base DN below ou=users names exactly one user, whatever the
+				// filter says, so only that user needs to be fetched.
+				if utils.HasSuffixNoCase(req.BaseDN, ","+ds.si.GetBaseUserDN()) {
+					if _, cn, _, ok := utils.FirstRDN(req.BaseDN); ok {
+						searchReq = searchReq.Username(cn)
+					}
+				}
 
 				if skip {
 					req.Log().Trace("Skip backend request")
@@ -159,6 +166,12 @@ func (ds *DirectSearcher) Search(req *search.Request) (ldap.ServerSearchResult, 
 			if skip {
 				req.Log().Trace("Skip backend request")
 				return nil
+			}
+			// Likewise a base DN below ou=groups names exactly one group.
+			if utils.HasSuffixNoCase(req.BaseDN, ","+ds.si.GetBaseGroupDN()) {
+				if _, cn, _, ok := utils.FirstRDN(req.BaseDN); ok {
+					searchReq = searchReq.Name(cn)
+				}
 			}
 
 			if !flags.CanSearch {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"beryju.io/ldap"
+	goldap "github.com/go-ldap/ldap/v3"
 	ldapConstants "goauthentik.io/internal/outpost/ldap/constants"
 )
 
@@ -166,4 +167,17 @@ func HasSuffixWithMore(input string, suffix string) (bool, bool) {
 		return hasSuffix, HasSuffixNoCase(input, ","+suffix)
 	}
 	return false, false
+}
+
+// FirstRDN returns the attribute type and value of the first RDN of a DN,
+// and the value of its second RDN (the OU in this outpost's tree, if any).
+func FirstRDN(dn string) (attr string, value string, ou string, ok bool) {
+	parsed, err := goldap.ParseDN(dn)
+	if err != nil || len(parsed.RDNs) == 0 || len(parsed.RDNs[0].Attributes) == 0 {
+		return "", "", "", false
+	}
+	if len(parsed.RDNs) > 1 && len(parsed.RDNs[1].Attributes) > 0 {
+		ou = parsed.RDNs[1].Attributes[0].Value
+	}
+	return parsed.RDNs[0].Attributes[0].Type, parsed.RDNs[0].Attributes[0].Value, ou, true
 }
