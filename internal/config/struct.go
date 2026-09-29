@@ -17,6 +17,7 @@ type Config struct {
 	Debug  bool         `yaml:"debug" env:"AUTHENTIK_DEBUG, overwrite"`
 	Listen ListenConfig `yaml:"listen" env:", prefix=AUTHENTIK_LISTEN__"`
 	Web    WebConfig    `yaml:"web" env:", prefix=AUTHENTIK_WEB__"`
+	LDAP   LDAPConfig   `yaml:"ldap" env:", prefix=AUTHENTIK_LDAP__"`
 
 	// Outpost specific config
 	// These are only relevant for proxy/ldap outposts, and cannot be set via YAML
@@ -107,4 +108,8 @@ type OutpostConfig struct {
 
 type WebConfig struct {
 	Path string `yaml:"path" env:"PATH, overwrite"`
+}
+
+type LDAPConfig struct {
+	PageSize int `yaml:"page_size" env:"PAGE_SIZE, overwrite"`
 }

@@ -24,13 +24,11 @@ func getAttributeString(attributes map[string]any, key string) (string, bool) {
 }
 
 func (pi *ProviderInstance) GroupsForUser(user api.User) []string {
-	groups := make([]string, len(user.Groups))
-	used := 0
-	for _, group := range user.GroupsObj {
-		groups[used] = pi.GetGroupDN(group.Name)
-		used = used + 1
+	groups := make([]string, len(user.GroupsObj))
+	for i, group := range user.GroupsObj {
+		groups[i] = pi.GetGroupDN(group.Name)
 	}
-	return groups[0:used]
+	return groups
 }
 
 func (pi *ProviderInstance) MembersForGroup(group api.Group) []string {

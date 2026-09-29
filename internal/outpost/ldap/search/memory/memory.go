@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"beryju.io/ldap"
 	"github.com/getsentry/sentry-go"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"goauthentik.io/api/v3"
+	"goauthentik.io/internal/config"
 	"goauthentik.io/internal/outpost/ak"
 	"goauthentik.io/internal/outpost/ldap/constants"
 	"goauthentik.io/internal/outpost/ldap/flags"
@@ -23,13 +27,26 @@ import (
 	"goauthentik.io/internal/outpost/ldap/utils"
 )
 
+// snapshot is an immutable view of the directory. Every fetch replaces it
+// wholesale, so a request must copy out whatever it needs and never retain a
+// pointer into one: such a pointer would keep the entire stale snapshot alive
+// for as long as it is held.
+type snapshot struct {
+	users     []api.User
+	groups    []api.Group
+	usersByPk map[int32]int // index into users
+}
+
 type MemorySearcher struct {
 	si  server.LDAPServerInstance
 	log *log.Entry
 	ds  *direct.DirectSearcher
 
-	users  []api.User
-	groups []api.Group
+	cache atomic.Pointer[snapshot]
+	// fetchMutex serialises full reloads. The refresh interval, websocket
+	// updates and SIGUSR1 can all trigger one, and they must not run at the
+	// same time against a large directory.
+	fetchMutex sync.Mutex
 }
 
 func NewMemorySearcher(si server.LDAPServerInstance, existing search.Searcher) *MemorySearcher {
@@ -42,17 +59,19 @@ func NewMemorySearcher(si server.LDAPServerInstance, existing search.Searcher) *
 		if ems, ok := existing.(*MemorySearcher); ok {
 			ems.si = si
 			ems.fetch()
-			ems.log.Debug("re-initialised memory searcher")
+			ems.log.Debug("re-initialized memory searcher")
 			return ems
 		}
 	}
 	ms.fetch()
-	ms.log.Debug("initialised memory searcher")
+	ms.log.Debug("initialized memory searcher")
 	return ms
 }
 
 func (ms *MemorySearcher) fetch() {
-	// Error is not handled here, we get an empty/truncated list and the error is logged
+	ms.fetchMutex.Lock()
+	defer ms.fetchMutex.Unlock()
+	start := time.Now()
 	userRequest := ms.si.GetAPIClient().CoreAPI.CoreUsersList(context.TODO())
 
 	/*
@@ -69,16 +88,34 @@ func (ms *MemorySearcher) fetch() {
 		userRequest = userRequest.Path(pathFilter)
 	}
 
-	users, _ := ak.Paginator(userRequest.IncludeGroups(true), ak.PaginatorOptions{
-		PageSize: 100,
+	// A failed or partial fetch must not replace a complete snapshot, or a
+	// single API error would empty the directory until the next refresh.
+	users, err := ak.Paginator(userRequest.IncludeGroups(true), ak.PaginatorOptions{
+		PageSize: config.Get().LDAP.PageSize,
 		Logger:   ms.log,
 	})
-	ms.users = users
-	groups, _ := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreGroupsList(context.TODO()).IncludeUsers(true).IncludeChildren(true).IncludeParents(true), ak.PaginatorOptions{
-		PageSize: 100,
+	if err != nil {
+		ms.log.WithError(err).Warning("failed to fetch users, keeping previous snapshot")
+		return
+	}
+	groups, err := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreGroupsList(context.TODO()).IncludeUsers(true).IncludeChildren(true).IncludeParents(true), ak.PaginatorOptions{
+		PageSize: config.Get().LDAP.PageSize,
 		Logger:   ms.log,
 	})
-	ms.groups = groups
+	if err != nil {
+		ms.log.WithError(err).Warning("failed to fetch groups, keeping previous snapshot")
+		return
+	}
+	ms.log.WithField("users", len(users)).WithField("groups", len(groups)).WithField("took", time.Since(start).String()).Info("fetched directory")
+	usersByPk := make(map[int32]int, len(users))
+	for i, u := range users {
+		usersByPk[u.Pk] = i
+	}
+	ms.cache.Store(&snapshot{
+		users:     users,
+		groups:    groups,
+		usersByPk: usersByPk,
+	})
 }
 
 func (ms *MemorySearcher) SearchBase(req *search.Request) (ldap.ServerSearchResult, error) {
@@ -125,6 +162,12 @@ func (ms *MemorySearcher) Search(req *search.Request) (ldap.ServerSearchResult, 
 	}
 	accsp.Finish()
 
+	snap := ms.cache.Load()
+	if snap == nil {
+		// No fetch has completed yet; treat the directory as empty.
+		snap = &snapshot{}
+	}
+
 	entries := make([]*ldap.Entry, 0)
 
 	scope := req.Scope
@@ -148,31 +191,22 @@ func (ms *MemorySearcher) Search(req *search.Request) (ldap.ServerSearchResult, 
 
 	if needUsers {
 		if flag.CanSearch {
-			users = &ms.users
+			users = &snap.users
 		} else {
-			u := make([]api.User, 1)
-			if flag.UserInfo == nil {
-				for i, u := range ms.users {
-					if u.Pk == flag.UserPk {
-						flag.UserInfo = &ms.users[i]
-					}
-				}
-				if flag.UserInfo == nil {
-					req.Log().WithField("pk", flag.UserPk).Warning("User with pk is not in local cache")
-					err = fmt.Errorf("failed to get userinfo")
-				}
+			if idx, ok := snap.usersByPk[flag.UserPk]; ok {
+				u := []api.User{snap.users[idx]}
+				users = &u
+			} else {
+				req.Log().WithField("pk", flag.UserPk).Warning("User with pk is not in local cache")
+				err = fmt.Errorf("failed to get userinfo")
 			}
-			if flag.UserInfo != nil {
-				u[0] = *flag.UserInfo
-			}
-			users = &u
 		}
 	}
 
 	if needGroups {
 		groups = make([]*group.LDAPGroup, 0)
 
-		for _, g := range ms.groups {
+		for _, g := range snap.groups {
 			if flag.CanSearch {
 				groups = append(groups, group.FromAPIGroup(g, ms.si))
 			} else {
