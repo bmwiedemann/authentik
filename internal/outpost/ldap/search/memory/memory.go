@@ -26,6 +26,7 @@ import (
 	"goauthentik.io/internal/outpost/ldap/search/direct"
 	"goauthentik.io/internal/outpost/ldap/server"
 	"goauthentik.io/internal/outpost/ldap/utils"
+	"golang.org/x/sync/errgroup"
 )
 
 // snapshot is an immutable view of the directory. Every fetch replaces it
@@ -79,38 +80,47 @@ func (ms *MemorySearcher) fetch() {
 	ms.fetchMutex.Lock()
 	defer ms.fetchMutex.Unlock()
 	start := time.Now()
-	userRequest := ms.si.GetAPIClient().CoreAPI.CoreUsersList(context.TODO())
-
-	/*
-			Hotfix. the better solution would be to identify which users actually have access to the provider this
-			MemorySearcher is assigned to.
-
-			That should be easy enough by looking for assigned applications and on those for assigned groups/users.
-			The hard part would be dynamic policies for access to applications. We can possibly ignore that
-		    or use direct searches for cache-misses but that wouldn't work for searches where we don't look for a username but scan the entire directory
-	*/
 	pathFilter := os.Getenv("FILTER_USER_PATH")
 
-	if pathFilter != "" {
-		userRequest = userRequest.Path(pathFilter)
-	}
+	// Users and groups are independent lists, so fetch them at the same
+	// time. Roles are never used for LDAP entries, so they're left out of the
+	// user payload.
+	var users []api.User
+	var groups []api.Group
+	errs, ctx := errgroup.WithContext(context.Background())
+	errs.Go(func() error {
+		var err error
+		userRequest := ms.si.GetAPIClient().CoreAPI.CoreUsersList(ctx).IncludeGroups(true).IncludeRoles(false)
 
+		/*
+				Hotfix. the better solution would be to identify which users actually have access to the provider this
+				MemorySearcher is assigned to.
+
+				That should be easy enough by looking for assigned applications and on those for assigned groups/users.
+				The hard part would be dynamic policies for access to applications. We can possibly ignore that
+			    or use direct searches for cache-misses but that wouldn't work for searches where we don't look for a username but scan the entire directory
+		*/
+		if pathFilter != "" {
+			userRequest = userRequest.Path(pathFilter)
+		}
+		users, err = ak.Paginator(userRequest, ak.PaginatorOptions{
+			PageSize: config.Get().LDAP.PageSize,
+			Logger:   ms.log,
+		})
+		return err
+	})
+	errs.Go(func() error {
+		var err error
+		groups, err = ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreGroupsList(ctx).IncludeUsers(true).IncludeChildren(true).IncludeParents(true), ak.PaginatorOptions{
+			PageSize: config.Get().LDAP.PageSize,
+			Logger:   ms.log,
+		})
+		return err
+	})
 	// A failed or partial fetch must not replace a complete snapshot, or a
 	// single API error would empty the directory until the next refresh.
-	users, err := ak.Paginator(userRequest.IncludeGroups(true), ak.PaginatorOptions{
-		PageSize: config.Get().LDAP.PageSize,
-		Logger:   ms.log,
-	})
-	if err != nil {
-		ms.log.WithError(err).Warning("failed to fetch users, keeping previous snapshot")
-		return
-	}
-	groups, err := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreGroupsList(context.TODO()).IncludeUsers(true).IncludeChildren(true).IncludeParents(true), ak.PaginatorOptions{
-		PageSize: config.Get().LDAP.PageSize,
-		Logger:   ms.log,
-	})
-	if err != nil {
-		ms.log.WithError(err).Warning("failed to fetch groups, keeping previous snapshot")
+	if err := errs.Wait(); err != nil {
+		ms.log.WithError(err).Warning("failed to fetch directory, keeping previous snapshot")
 		return
 	}
 	ms.log.WithField("users", len(users)).WithField("groups", len(groups)).WithField("took", time.Since(start).String()).Info("fetched directory")
