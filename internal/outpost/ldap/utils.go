@@ -8,7 +8,7 @@ import (
 )
 
 func (pi *ProviderInstance) GroupsForUser(user api.User) []string {
-	groups := make([]string, len(user.Groups))
+	groups := make([]string, len(user.GroupsObj))
 	for i, group := range user.GroupsObj {
 		groups[i] = pi.GetGroupDN(group.Name)
 	}

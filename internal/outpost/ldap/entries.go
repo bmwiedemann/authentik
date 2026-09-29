@@ -18,12 +18,21 @@ func (pi *ProviderInstance) UserEntry(u api.User) *ldap.Entry {
 	attrs := utils.AttributesToLDAP(u.Attributes, func(key string) string {
 		return utils.AttributeKeySanitize(key)
 	}, func(value []string) []string {
+		// The slice may belong to a cached user shared between requests, so
+		// it must not be modified in place.
+		var formatted []string
 		for i, v := range value {
 			if strings.Contains(v, "%s") {
-				value[i] = fmt.Sprintf(v, u.Username)
+				if formatted == nil {
+					formatted = append([]string(nil), value...)
+				}
+				formatted[i] = fmt.Sprintf(v, u.Username)
 			}
 		}
-		return value
+		if formatted == nil {
+			return value
+		}
+		return formatted
 	})
 
 	if u.IsActive == nil {

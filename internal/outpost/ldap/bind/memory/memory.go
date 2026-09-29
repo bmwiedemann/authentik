@@ -54,17 +54,24 @@ func (sb *SessionBinder) Bind(username string, req *bind.Request) (ldap.LDAPResu
 	}
 	sb.log.Debug("No session found for user, executing flow")
 	result, err := sb.DirectBinder.Bind(username, req)
-	// Only cache the result if there's been an error
-	if err == nil {
-		flags := sb.si.GetFlags(req.BindDN)
-		if flags == nil {
-			sb.log.Error("user flags not set after bind")
-			return result, err
-		}
-		sb.sessions.Set(Credentials{
-			DN:       req.BindDN,
-			Password: req.Password,
-		}, result, time.Until(flags.Session.Expires))
+	// Don't cache errors or failures of the outpost itself (such as an
+	// unreachable core), only outcomes that were decided by authentik.
+	if err != nil || result == ldap.LDAPResultOperationsError {
+		return result, err
 	}
+	flags := sb.si.GetFlags(req.BindDN)
+	if flags == nil {
+		sb.log.Error("user flags not set after bind")
+		return result, err
+	}
+	if flags.Session == nil {
+		// No session cookie means there is no expiry to derive a TTL from.
+		sb.log.Debug("no session cookie after bind, not caching")
+		return result, err
+	}
+	sb.sessions.Set(Credentials{
+		DN:       req.BindDN,
+		Password: req.Password,
+	}, result, time.Until(flags.Session.Expires))
 	return result, err
 }

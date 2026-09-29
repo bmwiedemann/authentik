@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"beryju.io/ldap"
 	"github.com/getsentry/sentry-go"
@@ -40,6 +42,10 @@ type MemorySearcher struct {
 	ds  *direct.DirectSearcher
 
 	cache atomic.Pointer[snapshot]
+	// fetchMutex serialises full reloads. The refresh interval, websocket
+	// updates and SIGUSR1 can all trigger one, and they must not run at the
+	// same time against a large directory.
+	fetchMutex sync.Mutex
 }
 
 func NewMemorySearcher(si server.LDAPServerInstance, existing search.Searcher) *MemorySearcher {
@@ -62,15 +68,28 @@ func NewMemorySearcher(si server.LDAPServerInstance, existing search.Searcher) *
 }
 
 func (ms *MemorySearcher) fetch() {
-	// Error is not handled here, we get an empty/truncated list and the error is logged
-	users, _ := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreUsersList(context.TODO()).IncludeGroups(true), ak.PaginatorOptions{
+	ms.fetchMutex.Lock()
+	defer ms.fetchMutex.Unlock()
+	start := time.Now()
+	// A failed or partial fetch must not replace a complete snapshot, or a
+	// single API error would empty the directory until the next refresh.
+	users, err := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreUsersList(context.TODO()).IncludeGroups(true), ak.PaginatorOptions{
 		PageSize: config.Get().LDAP.PageSize,
 		Logger:   ms.log,
 	})
-	groups, _ := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreGroupsList(context.TODO()).IncludeUsers(true).IncludeChildren(true).IncludeParents(true), ak.PaginatorOptions{
+	if err != nil {
+		ms.log.WithError(err).Warning("failed to fetch users, keeping previous snapshot")
+		return
+	}
+	groups, err := ak.Paginator(ms.si.GetAPIClient().CoreAPI.CoreGroupsList(context.TODO()).IncludeUsers(true).IncludeChildren(true).IncludeParents(true), ak.PaginatorOptions{
 		PageSize: config.Get().LDAP.PageSize,
 		Logger:   ms.log,
 	})
+	if err != nil {
+		ms.log.WithError(err).Warning("failed to fetch groups, keeping previous snapshot")
+		return
+	}
+	ms.log.WithField("users", len(users)).WithField("groups", len(groups)).WithField("took", time.Since(start).String()).Info("fetched directory")
 	usersByPk := make(map[int32]int, len(users))
 	for i, u := range users {
 		usersByPk[u.Pk] = i

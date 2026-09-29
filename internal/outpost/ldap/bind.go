@@ -1,6 +1,7 @@
 package ldap
 
 import (
+	"fmt"
 	"net"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 	"goauthentik.io/internal/outpost/ldap/metrics"
 )
 
-func (ls *LDAPServer) Bind(r ldap.BindRequest, conn net.Conn) (ldap.LDAPResultCode, error) {
+func (ls *LDAPServer) Bind(r ldap.BindRequest, conn net.Conn) (code ldap.LDAPResultCode, err error) {
 	req, span := bind.NewRequest(r, conn)
 	selectedApp := ""
 	defer func() {
@@ -26,12 +27,20 @@ func (ls *LDAPServer) Bind(r ldap.BindRequest, conn net.Conn) (ldap.LDAPResultCo
 	}()
 
 	defer func() {
-		err := recover()
-		if err == nil {
+		rec := recover()
+		if rec == nil {
 			return
 		}
-		log.WithError(err.(error)).Error("recover in bind request")
-		sentry.CaptureException(err.(error))
+		recErr, ok := rec.(error)
+		if !ok {
+			recErr = fmt.Errorf("%v", rec)
+		}
+		log.WithError(recErr).Error("recover in bind request")
+		sentry.CaptureException(recErr)
+		// Without this a recovered panic returns the zero result code, which
+		// is LDAPResultSuccess, and the bind is accepted without any check.
+		code = ldap.LDAPResultOperationsError
+		err = recErr
 	}()
 
 	for _, instance := range ls.providers {
