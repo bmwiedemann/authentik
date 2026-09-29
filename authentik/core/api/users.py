@@ -86,6 +86,7 @@ from authentik.core.models import (
     Token,
     TokenIntents,
     User,
+    UserGroup,
     UserTypes,
     default_token_duration,
 )
@@ -657,13 +658,21 @@ class UserViewSet(
             base_qs = base_qs.prefetch_related(
                 Prefetch("roles", queryset=Role.objects.all().only("uuid"))
             )
-        # Annotate is_superuser to avoid N+1 query per user
+        # Annotate is_superuser to avoid N+1 query per user.
+        #
+        # The set of groups that confer superuser status (superuser groups and
+        # their descendants) doesn't depend on the user, so it is computed once
+        # and the per-user check is an index lookup on the user's own
+        # memberships. Correlating the group query on the user instead made
+        # Postgres walk the memberships of every such group for every row.
+        superuser_groups = Group.objects.filter(
+            Q(is_superuser=True) | Q(ancestor_nodes__ancestor__is_superuser=True)
+        ).values("pk")
         base_qs = base_qs.annotate(
             _annotated_is_superuser=Exists(
-                Group.objects.filter(
-                    is_superuser=True,
-                ).filter(
-                    Q(users=OuterRef("pk")) | Q(descendant_nodes__descendant__users=OuterRef("pk"))
+                UserGroup.objects.filter(
+                    user_id=OuterRef("pk"),
+                    group_id__in=superuser_groups,
                 )
             )
         )
