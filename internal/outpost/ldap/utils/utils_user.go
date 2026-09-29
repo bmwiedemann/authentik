@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"strings"
+
 	"beryju.io/ldap"
 	goldap "github.com/go-ldap/ldap/v3"
 	ber "github.com/nmcclain/asn1-ber"
@@ -42,17 +44,20 @@ func parseFilterForUserSingle(req api.ApiCoreUsersListRequest, f *ber.Packet) (a
 	if val == nil {
 		return req, false
 	}
-	switch k {
-	case "cn":
+	// LDAP attribute names are case-insensitive. Anything not handled here
+	// is left for the LDAP server library to filter on the full result, so a
+	// mapping only ever narrows the request and never changes the result.
+	//
+	// "uid" is deliberately not mapped: the entry's uid is a hash of the
+	// user's pk, not the username.
+	switch strings.ToLower(k.(string)) {
+	case "cn", "samaccountname":
 		return req.Username(*val), false
-	case "name":
-	case "displayName":
+	case "name", "displayname":
 		return req.Name(*val), false
 	case "mail":
 		return req.Email(*val), false
-	case "member":
-		fallthrough
-	case "memberOf":
+	case "member", "memberof":
 		groupDN, err := goldap.ParseDN(*val)
 		if err != nil {
 			return req.GroupsByName([]string{*val}), false
@@ -60,7 +65,8 @@ func parseFilterForUserSingle(req api.ApiCoreUsersListRequest, f *ber.Packet) (a
 		name := groupDN.RDNs[0].Attributes[0].Value
 		// If the DN's first ou is virtual-groups, ignore this filter
 		if len(groupDN.RDNs) > 1 {
-			if groupDN.RDNs[1].Attributes[0].Value == constants.OUUsers || groupDN.RDNs[1].Attributes[0].Value == constants.OUVirtualGroups {
+			ou := groupDN.RDNs[1].Attributes[0].Value
+			if strings.EqualFold(ou, constants.OUUsers) || strings.EqualFold(ou, constants.OUVirtualGroups) {
 				// Since we know we're not filtering anything, skip this request
 				return req, true
 			}
