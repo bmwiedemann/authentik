@@ -1,0 +1,2 @@
+This git project has some support for LDAP-access (we want legacy systems to authenticate with it), but there is concern that it is too slow for productive use with 500000 accounts and use of groups.
+Please investigate what the current performance is and in what ways it could be meaningfully improved without needing intrusive changes.
