@@ -234,7 +234,9 @@ func (s *snapshot) groupsOfUser(pk int32) []api.Group {
 			continue
 		}
 		full := s.groups[gi]
-		fg := api.NewGroup(full.Pk, full.NumPk, full.Name, []api.RelatedGroup{}, []api.PartialUser{member}, []api.Role{}, nil, []string{}, []api.RelatedGroup{})
+		// Keep the group's parents and children, as direct mode does; only the
+		// user members are reduced to the user themselves.
+		fg := api.NewGroup(full.Pk, full.NumPk, full.Name, full.ParentsObj, []api.PartialUser{member}, []api.Role{}, nil, full.Children, full.ChildrenObj)
 		fg.SetUsers([]int32{pk})
 		fg.SetAttributes(full.Attributes)
 		if full.IsSuperuser != nil {
