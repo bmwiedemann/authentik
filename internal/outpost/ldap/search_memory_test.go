@@ -281,3 +281,49 @@ func TestMemorySearcherRefreshesUserEntry(t *testing.T) {
 	// lifetime. The memory searcher must never populate it.
 	assert.Nil(t, pi.GetFlags(memTestAliceDN).UserInfo)
 }
+
+// TestMemorySearcherNoSearchGroupKeepsChildren pins that the groups shown to a
+// user without search permission list their child groups as members, as
+// direct mode does, while user members are reduced to the user themselves.
+func TestMemorySearcherNoSearchGroupKeepsChildren(t *testing.T) {
+	bob := api.PartialUser{Pk: 2, Username: "bob", Name: "Bob", IsActive: new(true), Uid: "bob-uid"}
+	groupX := memGroup(memTestGroupXPk, 10, "x", []api.PartialUser{memAlicePartial(), bob})
+	groupY := memGroup(memTestGroupYPk, 11, "y", []api.PartialUser{})
+	groupX.Children = []string{memTestGroupYPk}
+	groupX.ChildrenObj = []api.RelatedGroup{{Pk: memTestGroupYPk, Name: "y"}}
+	groupY.ParentsObj = []api.RelatedGroup{{Pk: memTestGroupXPk, Name: "x"}}
+
+	dir := &memDirectory{}
+	dir.set([]api.User{memAliceUser([]api.PartialGroup{memPartialGroup(memTestGroupXPk, 10, "x")})}, []api.Group{groupX, groupY})
+	client, closeServer := memNewAPIClient(t, dir)
+	defer closeServer()
+	pi := memProviderInstance(client)
+	pi.SetFlags(memTestAliceDN, &flags.UserFlags{UserPk: 1, CanSearch: false})
+	searcher := memory.NewMemorySearcher(pi, nil)
+
+	client2, server := net.Pipe()
+	defer func() {
+		_ = client2.Close()
+		_ = server.Close()
+	}()
+	req, span := search.NewRequest(memTestAliceDN, ldap.SearchRequest{
+		BaseDN: memTestGroupDN,
+		Scope:  ldap.ScopeWholeSubtree,
+		Filter: "(objectClass=group)",
+	}, client2)
+	defer span.Finish()
+	res, err := searcher.Search(req)
+	assert.NoError(t, err)
+	var entries []*ldap.Entry
+	for _, e := range res.Entries {
+		if e.DN == pi.GetGroupDN("x") {
+			entries = append(entries, e)
+		}
+	}
+	if assert.Len(t, entries, 1, "only the user's own group is returned") {
+		memAssertAttribute(t, entries[0].Attributes, &ldap.EntryAttribute{
+			Name:   "member",
+			Values: []string{memTestAliceDN, pi.GetGroupDN("y")},
+		})
+	}
+}
