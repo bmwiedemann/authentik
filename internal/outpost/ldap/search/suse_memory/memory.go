@@ -651,9 +651,19 @@ func (ms *MemorySearcher) Search(req *search.Request) (ldap.ServerSearchResult, 
 	currentUser, ok := suse.GetFromMapping(globalUserCache, flag.UserPk)
 	if !ok {
 		// User got authorized by the provider, but it's not in the cache slice controlled by the env vars.
-		// We'll add it to the cache, the can search flag still comes from the provider authorization flow.
-		req.Log().WithField("username", flag.UserPk).Warning("Request user is not in local cache, adding it.")
-		suse.SetKeyInMapping(globalUserCache, flag.UserPk, flag.UserInfo)
+		// Fetch the full user (the bind only knows its pk) and add it to the cache; the can search
+		// flag still comes from the provider authorization flow.
+		req.Log().WithField("pk", flag.UserPk).Warning("Request user is not in local cache, fetching it.")
+		uapisp := sentry.StartSpan(req.Context(), "authentik.providers.ldap.suse_search.api_user")
+		u, _, err := ms.si.GetAPIClient().CoreAPI.CoreUsersRetrieve(uapisp.Context(), flag.UserPk).Execute()
+		uapisp.Finish()
+		if err != nil {
+			req.Log().WithError(err).Warning("Failed to get user info")
+			return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, fmt.Errorf("failed to get userinfo")
+		}
+		ms.enrichUserGroupsFromCache(u)
+		suse.SetKeyInMapping(globalUserCache, u.Pk, u)
+		currentUser = u
 	}
 
 	// End -- AuthN & AuthZ

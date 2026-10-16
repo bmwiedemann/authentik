@@ -7,7 +7,6 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
-	"goauthentik.io/api/v3"
 	"goauthentik.io/internal/outpost/flow"
 	"goauthentik.io/internal/outpost/ldap/bind"
 	"goauthentik.io/internal/outpost/ldap/flags"
@@ -100,16 +99,9 @@ func (db *DirectBinder) Bind(username string, req *bind.Request) (ldap.LDAPResul
 		return ldap.LDAPResultOperationsError, nil
 	}
 	flags.UserPk = userInfo.User.Pk
-
-	// Reconstruct a full User object from the /users/me response
-	flags.UserInfo = api.NewUserWithDefaults()
-	flags.UserInfo.Pk = userInfo.User.Pk
-	flags.UserInfo.Username = userInfo.User.Username
-	flags.UserInfo.Name = userInfo.User.Name
-	flags.UserInfo.SetIsActive(userInfo.User.GetIsActive())
-	flags.UserInfo.IsSuperuser = userInfo.User.IsSuperuser
-	flags.UserInfo.Email = userInfo.User.Email
-
+	// UserInfo is deliberately left nil: /users/me only carries a handful of
+	// fields (no uid, groups, attributes, timestamps). Searchers that need the
+	// full user fetch it by UserPk the first time it is needed.
 	flags.CanSearch = access.GetHasSearchPermission()
 	db.si.SetFlags(req.BindDN, &flags)
 	if flags.CanSearch {
